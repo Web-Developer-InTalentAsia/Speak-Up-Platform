@@ -1,0 +1,34 @@
+{
+  "name": "speak-up-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "npm run build --workspace=@speak-up/shared",
+    "predev:reporter": "npm run build --workspace=@speak-up/shared",
+    "predev:admin": "npm run build --workspace=@speak-up/shared",
+    "predev:api": "npm run build --workspace=@speak-up/shared",
+    "dev": "concurrently -n reporter,admin,api -c blue,magenta,green \"npm run dev --workspace=@speak-up/reporter\" \"npm run dev --workspace=@speak-up/admin\" \"npm run dev --workspace=@speak-up/api\"",
+    "dev:reporter": "npm run dev --workspace=@speak-up/reporter",
+    "dev:admin": "npm run dev --workspace=@speak-up/admin",
+    "dev:api": "npm run dev --workspace=@speak-up/api",
+    "build": "npm run build --workspace=@speak-up/shared && npm run build --workspace=@speak-up/api && npm run build --workspace=@speak-up/reporter && npm run build --workspace=@speak-up/admin",
+    "typecheck": "npm run build --workspace=@speak-up/shared && npm run typecheck --workspaces --if-present",
+    "lint": "prettier --check .",
+    "check": "npm run lint && npm run typecheck",
+    "format": "prettier --write .",
+    "db:generate": "npm run prisma:generate --workspace=@speak-up/api",
+    "db:push": "npm run prisma:push --workspace=@speak-up/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.5.3"
+  },
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10.0.0"
+  }
+}

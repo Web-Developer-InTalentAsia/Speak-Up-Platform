@@ -1,0 +1,8 @@
+node_modules
+.next
+.next-production
+dist
+coverage
+package-lock.json
+next-env.d.ts
+*.tsbuildinfo
