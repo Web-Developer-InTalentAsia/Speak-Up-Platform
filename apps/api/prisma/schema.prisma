@@ -7,4 +7,261 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Report models will be added once the reporting workflow is defined.
+enum ActorRole {
+  REPORTER
+  ADMINISTRATOR
+}
+
+enum CaseStatus {
+  NEW
+  ACKNOWLEDGED
+  ASSESSMENT
+  INVESTIGATION
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  admins    AdminUser[]
+  cases     ReportCase[]
+  subjects  CaseSubject[]
+  exclusions ConflictExclusion[]
+  messages  CaseMessage[]
+  attachments Attachment[]
+  events    CaseEvent[]
+  tasks     CaseTask[]
+  slaPolicies SlaPolicy[]
+  notifications NotificationOutbox[]
+  auditLogs AuditLog[]
+}
+
+model AdminUser {
+  id                   String @id @default(uuid()) @db.Uuid
+  organizationId       String @db.Uuid
+  email                String
+  passwordHash         String
+  active               Boolean @default(true)
+  locked               Boolean @default(false)
+  disabled             Boolean @default(false)
+  mfaRequired          Boolean @default(true)
+  mfaEnabled           Boolean @default(false)
+  mfaSecretCiphertext   Bytes?
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignedCases        ReportCase[] @relation("AssignedAdmin")
+  requestedClosures    ReportCase[] @relation("ClosureRequester")
+  approvedClosures     ReportCase[] @relation("ClosureApprover")
+  exclusions           ConflictExclusion[]
+  messages             CaseMessage[]
+  events               CaseEvent[]
+  tasks                CaseTask[]
+  auditLogs            AuditLog[]
+  @@unique([organizationId, id])
+  @@unique([organizationId, email])
+}
+
+model ReportCase {
+  id                      String @id @default(uuid()) @db.Uuid
+  organizationId          String @db.Uuid
+  reference               String @unique
+  status                  CaseStatus @default(NEW)
+  titleCiphertext         Bytes
+  detailsCiphertext       Bytes
+  reporterContactCiphertext Bytes?
+  reporterTokenHash       Bytes
+  reporterTokenKeyVersion Int
+  assignedAdminId         String? @db.Uuid
+  closureRequestedById    String? @db.Uuid
+  closureApprovedById     String? @db.Uuid
+  slaPolicyId             String? @db.Uuid
+  acknowledgedAt          DateTime? @db.Timestamptz(3)
+  resolvedAt              DateTime? @db.Timestamptz(3)
+  closedAt                DateTime? @db.Timestamptz(3)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @db.Timestamptz(3)
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignedAdmin           AdminUser? @relation("AssignedAdmin", fields: [organizationId, assignedAdminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  closureRequestedBy      AdminUser? @relation("ClosureRequester", fields: [organizationId, closureRequestedById], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  closureApprovedBy       AdminUser? @relation("ClosureApprover", fields: [organizationId, closureApprovedById], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  slaPolicy               SlaPolicy? @relation(fields: [organizationId, slaPolicyId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  subjects                CaseSubject[]
+  exclusions              ConflictExclusion[]
+  messages                CaseMessage[]
+  attachments             Attachment[]
+  events                  CaseEvent[]
+  tasks                   CaseTask[]
+  notifications           NotificationOutbox[]
+  auditLogs               AuditLog[]
+  @@unique([organizationId, id])
+  @@unique([organizationId, reporterTokenKeyVersion, reporterTokenHash])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, assignedAdminId])
+}
+
+model CaseSubject {
+  id                 String @id @default(uuid()) @db.Uuid
+  organizationId     String @db.Uuid
+  caseId             String @db.Uuid
+  identityCiphertext Bytes
+  detailsCiphertext  Bytes?
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase         ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, caseId])
+}
+
+model ConflictExclusion {
+  id               String @id @default(uuid()) @db.Uuid
+  organizationId   String @db.Uuid
+  caseId           String @db.Uuid
+  adminId          String @db.Uuid
+  reasonCiphertext Bytes
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase       ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  admin            AdminUser @relation(fields: [organizationId, adminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@unique([organizationId, caseId, adminId])
+}
+
+model CaseMessage {
+  id               String @id @default(uuid()) @db.Uuid
+  organizationId   String @db.Uuid
+  caseId           String @db.Uuid
+  authorRole       ActorRole
+  authorAdminId    String? @db.Uuid
+  bodyCiphertext   Bytes
+  internal         Boolean @default(false)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase       ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  authorAdmin      AdminUser? @relation(fields: [organizationId, authorAdminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, caseId, createdAt])
+}
+
+model Attachment {
+  id                    String @id @default(uuid()) @db.Uuid
+  organizationId        String @db.Uuid
+  caseId                String @db.Uuid
+  storageKeyCiphertext  Bytes
+  fileNameCiphertext    Bytes
+  mediaTypeCiphertext   Bytes
+  sizeBytes             BigInt
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase            ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, caseId])
+}
+
+model CaseEvent {
+  id                String @id @default(uuid()) @db.Uuid
+  organizationId    String @db.Uuid
+  caseId            String @db.Uuid
+  actorRole         ActorRole
+  actorAdminId      String? @db.Uuid
+  eventType         String
+  detailsCiphertext Bytes?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase        ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  actorAdmin        AdminUser? @relation(fields: [organizationId, actorAdminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, caseId, createdAt])
+}
+
+model CaseTask {
+  id                String @id @default(uuid()) @db.Uuid
+  organizationId    String @db.Uuid
+  caseId            String @db.Uuid
+  assignedAdminId   String? @db.Uuid
+  titleCiphertext   Bytes
+  detailsCiphertext Bytes?
+  status            TaskStatus @default(PENDING)
+  dueAt             DateTime? @db.Timestamptz(3)
+  completedAt       DateTime? @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase        ReportCase @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  assignedAdmin     AdminUser? @relation(fields: [organizationId, assignedAdminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, caseId])
+  @@index([organizationId, status, dueAt])
+}
+
+model SlaPolicy {
+  id                  String @id @default(uuid()) @db.Uuid
+  organizationId      String @db.Uuid
+  name                String
+  acknowledgementHours Int
+  resolutionHours     Int
+  active              Boolean @default(true)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @db.Timestamptz(3)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  cases               ReportCase[]
+  @@unique([organizationId, id])
+  @@unique([organizationId, name])
+}
+
+model NotificationOutbox {
+  id                  String @id @default(uuid()) @db.Uuid
+  organizationId      String @db.Uuid
+  caseId              String? @db.Uuid
+  deduplicationKey    String
+  payloadCiphertext   Bytes
+  status              OutboxStatus @default(PENDING)
+  attempts            Int @default(0)
+  availableAt         DateTime @default(now()) @db.Timestamptz(3)
+  lockedAt            DateTime? @db.Timestamptz(3)
+  sentAt              DateTime? @db.Timestamptz(3)
+  lastErrorCiphertext Bytes?
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @db.Timestamptz(3)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase          ReportCase? @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@unique([organizationId, deduplicationKey])
+  @@index([organizationId, status, availableAt])
+}
+
+model AuditLog {
+  id                String @id @default(uuid()) @db.Uuid
+  organizationId    String @db.Uuid
+  caseId            String? @db.Uuid
+  actorRole         ActorRole
+  actorAdminId      String? @db.Uuid
+  action            String
+  detailsCiphertext Bytes?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reportCase        ReportCase? @relation(fields: [organizationId, caseId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  actorAdmin        AdminUser? @relation(fields: [organizationId, actorAdminId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([organizationId, id])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, caseId])
+}
